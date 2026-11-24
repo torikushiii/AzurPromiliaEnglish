@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Unit tests
+        run: uv run --python 3.12 --no-project python -m unittest discover -s tests
+      - name: Build release
+        shell: pwsh
+        run: ./release.ps1
+      - name: Check tag matches the patch version
+        shell: pwsh
+        run: |
+          $zip = "release/AP-English-Patcher-$env:GITHUB_REF_NAME.zip"
+          if (-not (Test-Path -LiteralPath $zip)) {
+            throw "Tag $env:GITHUB_REF_NAME does not match the patch version in patcher/data/patch-data.bin."
+          }
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create $env:GITHUB_REF_NAME
+          "release/AP-English-Patcher-$env:GITHUB_REF_NAME.zip"
+          --title "English Patch $env:GITHUB_REF_NAME"
+          --notes-file "release/notes-$env:GITHUB_REF_NAME.md"

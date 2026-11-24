@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Ruff lint
+        run: uvx ruff@0.14.0 check --output-format github
+      - name: Ruff format
+        run: uvx ruff@0.14.0 format --check
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Unit tests
+        run: uv run --python 3.12 --no-project python -m unittest discover -s tests -v
+
+  build:
+    needs: [lint, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build patcher
+        shell: pwsh
+        run: ./build_exe.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AP-English-Patcher
+          path: dist/AP-English-Patcher.exe
+          if-no-files-found: error

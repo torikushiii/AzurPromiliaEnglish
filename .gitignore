@@ -1,0 +1,5 @@
+dist/
+release/
+__pycache__/
+*.pyc
+patcher/data/icon.png
