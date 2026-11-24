@@ -10,6 +10,12 @@ This project is not affiliated with or endorsed by the developers or publishers 
 > [!NOTE]
 > Testing so far covers only the login screen, the main menus and the settings. Story, quests and other in-game text have not been checked in game yet, so expect rough or untested translations there. Screenshots of lines that read badly are welcome in [Issues](../../issues).
 
+## Screenshots
+
+| Graphics | Audio | Account |
+|:---:|:---:|:---:|
+| <a href="docs/screenshots/graphics.jpg"><img src="docs/screenshots/graphics.jpg" width="280" alt="Graphics settings in English"></a> | <a href="docs/screenshots/audio.jpg"><img src="docs/screenshots/audio.jpg" width="280" alt="Audio settings in English"></a> | <a href="docs/screenshots/account.jpg"><img src="docs/screenshots/account.jpg" width="280" alt="Account settings in English"></a> |
+
 ## Requirements
 
 - Windows PC version of Azur Promilia (Japanese client)
@@ -33,6 +39,13 @@ If the patcher ever reports unrecognized files, use the in-game resource check u
 ## Known limitations
 
 - A few fixed interface labels, such as the settings toggles' 閉じる and the 初期設定に戻す button, stay in Japanese because they are not stored in the game's text tables.
+
+## Alternatives
+
+If you would rather not change any game files, these separate projects translate what is on screen with an overlay instead. They are not affiliated with this patch.
+
+- [Game Translation HUD](https://github.com/ph1-st/game-translation-hud): reads the game window and draws the translation over the original text. It has a built-in Azur Promilia preset.
+- [DanteTL](https://github.com/nhmelo/danteTL): a real-time translation overlay with offline or cloud translation models.
 
 ## How it works
 
