@@ -10,8 +10,10 @@ import subprocess
 import sys
 import tempfile
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import bundles
 
 SPAN = 0x1018
 PAGE = 4096
@@ -23,6 +25,9 @@ DATA_DIR = "AzurPromiliaJP_Data"
 LAUNCHER_CONFIG = "game-launcher-config.json"
 MAGIC = b"APEN-PATCH-1\n"
 CREATE_NO_WINDOW = 0x08000000
+BACKUP_DIR = (
+    Path(os.environ.get("LOCALAPPDATA", Path.home())) / "AP-English-Patcher" / "backup"
+)
 
 
 class PatchError(Exception):
@@ -49,6 +54,7 @@ class PatchData:
     new_hashes: array  # uint64 spookyhash of each new string
     edits: array  # flat uint32 triples: offset, stock value, patched value
     game_version: str = ""
+    text_bundles: list[bundles.TextBundle] = field(default_factory=list)
 
     @property
     def game_label(self) -> str:
@@ -82,6 +88,8 @@ def save_patch_data(path: Path, data: PatchData) -> None:
         },
         "blob_sizes": [len(b) for b in blobs],
     }
+    if data.text_bundles:
+        header["bundles"] = [b.as_json() for b in data.text_bundles]
     head = json.dumps(header, ensure_ascii=False).encode("utf-8")
     payload = MAGIC + U32.pack(len(head)) + head + b"".join(blobs)
     path.write_bytes(lzma.compress(payload, preset=9))
@@ -128,6 +136,7 @@ def load_patch_data(path: Path | None = None) -> PatchData:
         hashes,
         edits,
         header.get("game_version", ""),
+        [bundles.TextBundle(**b) for b in header.get("bundles", [])],
     )
 
 
@@ -420,6 +429,10 @@ def inspect(game: Path, patch: PatchData) -> Status:
             if digest == info.patched_sha256
             else "other"
         )
+    for info in patch.text_bundles:
+        state = _bundle_state(game, info)
+        if state:
+            states[info.role] = state
     values = set(states.values())
     if values == {"stock"}:
         return Status("stock", "Original Japanese text is installed.", states)
@@ -442,6 +455,61 @@ def inspect(game: Path, patch: PatchData) -> Status:
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _bundle_path(game: Path, info: bundles.TextBundle) -> Path:
+    return game / Path(info.path.replace("\\", "/"))
+
+
+def _bundle_state(game: Path, info: bundles.TextBundle) -> str | None:
+    """stock or patched; None when missing or changed by something else (skipped)."""
+    target = _bundle_path(game, info)
+    if not target.is_file():
+        return None
+    digest = _sha(target.read_bytes())
+    if digest == info.stock_sha256:
+        return "stock"
+    if digest == info.patched_sha256:
+        return "patched"
+    return None
+
+
+def _backup_path(info: bundles.TextBundle) -> Path:
+    return BACKUP_DIR / f"{info.role}-{info.stock_sha256[:16]}.bin"
+
+
+def _bundle_replacement(game: Path, info: bundles.TextBundle, to_patched: bool):
+    target = _bundle_path(game, info)
+    current = target.read_bytes()
+    try:
+        if to_patched:
+            new = bundles.patched_bytes(current, info)
+            original = current[info.backup_start : info.backup_end]
+            if _sha(original) != info.backup_sha256:
+                raise PatchError(f"{target.name} does not match the tested version.")
+            backup = _backup_path(info)
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            if not backup.is_file() or backup.read_bytes() != original:
+                backup.write_bytes(original)
+        else:
+            saved = _backup_path(info)
+            original = saved.read_bytes() if saved.is_file() else b""
+            if _sha(original) != info.backup_sha256:
+                raise PatchError(
+                    f"The saved original of {target.name} is missing, so its English "
+                    "startup text cannot be removed here. Use the in-game resource "
+                    "check to restore the original files."
+                )
+            new = bundles.restored_bytes(current, info, original)
+    except bundles.BundleError as e:
+        raise PatchError(f"{target.name}: {e}") from e
+    expected = info.patched_sha256 if to_patched else info.stock_sha256
+    if _sha(new) != expected:
+        raise PatchError(
+            f"The rebuilt {target.name} did not match the tested version. "
+            "Nothing was changed."
+        )
+    return target, current, new
 
 
 def _patched_pool(raw: bytes, patch: PatchData) -> bytes:
@@ -551,6 +619,10 @@ def _run(game: Path, patch: PatchData, to_patched: bool, progress) -> str:
                 "Nothing was changed."
             )
         replacements.append((target, current, new))
+    for info in patch.text_bundles:
+        if status.states.get(info.role) not in (None, want):
+            progress(f"Building {_bundle_path(game, info).name}...")
+            replacements.append(_bundle_replacement(game, info, to_patched))
     _install(replacements, progress)
     final = inspect(game, patch)
     if final.kind != want:

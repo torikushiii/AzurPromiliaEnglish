@@ -56,6 +56,8 @@ class Cipher:
         index = []
         for b in key[:8]:
             index += [b >> 4, b & 15]
+        if sorted(index) != list(range(16)):
+            raise BundleError("Bad text bundle key.")
         inv = [0] * 16
         for i, v in enumerate(index):
             inv[v] = i

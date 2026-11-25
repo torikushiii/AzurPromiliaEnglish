@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import importlib
 import importlib.util
+import json
 import struct
 import sys
 from array import array
@@ -19,6 +20,13 @@ b = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(b)
 archive = importlib.import_module("archive")
 engine = importlib.import_module("engine")
+bundles = importlib.import_module("bundles")
+spec = importlib.util.spec_from_file_location(
+    "textbundles", STUFF / "scripts" / "boot-dryrun.py"
+)
+tb = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tb)
+SHIPPED_BUNDLES = ("boot",)  # the label table ships once it is fully translated
 AES = importlib.import_module("Crypto.Cipher.AES")
 unpad = importlib.import_module("Crypto.Util.Padding").unpad
 
@@ -36,6 +44,41 @@ def seed_of(raw):
     )
     assert len(seed) == 4096
     return seed
+
+
+def stock_bundle_file(role, raw):
+    """The game file without our own test install (undone from its saved bytes)."""
+    saved = STUFF / "boot-strings" / "test-install"
+    info_path, orig_path = saved / f"{role}.json", saved / f"{role}.orig"
+    if info_path.exists() and orig_path.exists():
+        info = bundles.TextBundle(**json.loads(info_path.read_text("utf-8")))
+        if sha(raw) == info.patched_sha256:
+            raw = bundles.restored_bytes(raw, info, orig_path.read_bytes())
+            assert sha(raw) == info.stock_sha256
+    return raw
+
+
+def text_bundles():
+    out = []
+    for role in SHIPPED_BUNDLES:
+        kind, path, marker, strings_file = tb.TARGETS[role]
+        stock = stock_bundle_file(role, (tb.GAME / path).read_bytes())
+        info = tb.locate(stock, kind, path, marker)
+        info.role = role
+        info.strings = json.loads((STUFF / strings_file).read_text("utf-8"))
+        start, end, _ = bundles.changed_range(stock, info)
+        patched = bundles.patched_bytes(stock, info)
+        info.backup_start, info.backup_end = start, end
+        info.backup_sha256 = sha(stock[start:end])
+        info.patched_sha256 = sha(patched)
+        assert bundles.restored_bytes(patched, info, stock[start:end]) == stock
+        print(
+            f"{role}: {len(info.strings)} strings, stock {info.stock_sha256[:12]}  "
+            f"english {info.patched_sha256[:12]}",
+            flush=True,
+        )
+        out.append((info, stock))
+    return out
 
 
 def main():
@@ -121,6 +164,7 @@ def main():
             if before != after:
                 edits.extend((ptr, before, after))
     print(f"table rows changed: {len(edits) // 3}", flush=True)
+    shipped = text_bundles()
 
     data = engine.PatchData(
         args.version,
@@ -131,6 +175,7 @@ def main():
         new_hashes,
         edits,
         game_version,
+        [info for info, _ in shipped],
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     engine.save_patch_data(args.out, data)
@@ -144,6 +189,14 @@ def main():
         sha(engine._swap_table(stock["table"], data, True))
         == files["table"].patched_sha256
     )
+    for info, stock in shipped:
+        loaded = next(b for b in data.text_bundles if b.role == info.role)
+        patched = bundles.patched_bytes(stock, loaded)
+        assert sha(patched) == loaded.patched_sha256
+        backup = stock[loaded.backup_start : loaded.backup_end]
+        assert (
+            sha(bundles.restored_bytes(patched, loaded, backup)) == loaded.stock_sha256
+        )
     print("simulating restore...", flush=True)
     assert sha(engine._stock_pool(final["pool"], data)) == files["pool"].stock_sha256
     assert (
