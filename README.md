@@ -7,8 +7,13 @@ An unofficial English translation of the in-game text for **Azur Promilia (Japan
 
 This project is not affiliated with or endorsed by the developers or publishers of Azur Promilia.
 
+> [!TIP]
+> **Use version 1.4 or newer.** Earlier releases were mostly machine translation. Since 1.4, the prologue and all of Chapter 1 have been reviewed line by line against the Japanese, with consistent names for characters and places. Later chapters are still being reviewed and improve with each release.
+>
+> **Upgrading from an older version:** run the patcher you installed it with and click **Restore Japanese**, then install 1.4. If you no longer have the old patcher, restore the original files with the in-game **Settings → Other → Resource Integrity** check first.
+
 > [!NOTE]
-> Testing so far covers only the login screen, the main menus and the settings. Story, quests and other in-game text have not been checked in game yet, so expect rough or untested translations there. Screenshots of lines that read badly are welcome in [Issues](../../issues).
+> The menus and settings have been tested in game. Story text from Chapter 2 onward, quests and item descriptions are still largely machine translation. Screenshots of lines that read badly are welcome in [Issues](../../issues).
 
 ## Screenshots
 
