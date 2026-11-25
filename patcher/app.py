@@ -9,10 +9,12 @@ import queue
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 import engine
+import updates
 
 APP_TITLE = "Azur Promilia English Fan Patch"
 SETTINGS = (
@@ -42,7 +44,7 @@ def load_settings() -> dict:
 def save_settings(values: dict) -> None:
     try:
         SETTINGS.parent.mkdir(parents=True, exist_ok=True)
-        SETTINGS.write_text(json.dumps(values), encoding="utf-8")
+        SETTINGS.write_text(json.dumps({**load_settings(), **values}), encoding="utf-8")
     except OSError:
         pass
 
@@ -53,6 +55,8 @@ class App(tk.Tk):
         self.patch = patch
         self.events: queue.Queue = queue.Queue()
         self.busy = False
+        self.release: updates.Release | None = None
+        self.last_status: engine.Status | None = None
         self.title(APP_TITLE)
         self.resizable(False, False)
         icon = (
@@ -77,11 +81,20 @@ class App(tk.Tk):
         ttk.Label(outer, text=APP_TITLE, font=("Segoe UI", 14, "bold")).grid(
             row=0, column=0, columnspan=2, sticky="w"
         )
+        version_row = ttk.Frame(outer)
+        version_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, px(12)))
         ttk.Label(
-            outer,
+            version_row,
             text=f"Patch {patch.version} for {patch.game_label}",
             foreground="#666",
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, px(12)))
+        ).pack(side="left")
+        self.update_link = ttk.Label(
+            version_row,
+            foreground="#0a5fc2",
+            cursor="hand2",
+            font=("Segoe UI", 9, "underline"),
+        )
+        self.update_link.bind("<Button-1>", lambda _e: self.open_release())
 
         ttk.Label(outer, text="Game folder").grid(
             row=2, column=0, columnspan=2, sticky="w"
@@ -139,6 +152,30 @@ class App(tk.Tk):
 
         self.after(100, self.poll)
         self.after(50, self.pick_initial_folder)
+        if load_settings().get("check_updates", True):
+            self.check_for_update()
+
+    def check_for_update(self):
+        def worker():
+            release = updates.newer_release(self.patch.version)
+            if release:
+                self.events.put(("update", release))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def show_update(self, release: updates.Release):
+        self.release = release
+        self.update_link.configure(
+            text=f"Patch {release.version} is available: download"
+        )
+        gap = int(round(8 * self.winfo_fpixels("1i") / 96.0))
+        self.update_link.pack(side="left", padx=(gap, 0))
+        if self.last_status:
+            self.show_status(self.last_status)
+
+    def open_release(self):
+        if self.release:
+            webbrowser.open(self.release.url)
 
     def pick_initial_folder(self):
         saved = load_settings().get("game_dir")
@@ -191,6 +228,9 @@ class App(tk.Tk):
         try:
             while True:
                 kind, value = self.events.get_nowait()
+                if kind == "update":
+                    self.show_update(value)
+                    continue
                 self.progress.stop()
                 self.progress.grid_remove()
                 self.busy = False
@@ -231,8 +271,15 @@ class App(tk.Tk):
             "wrong_build": "Different game version",
             "not_found": "Game folder not found",
         }
+        self.last_status = st
         self.status.set(titles.get(st.kind, st.kind))
-        self.detail.set(st.message)
+        message = st.message
+        if st.kind == "wrong_build" and self.release:
+            message += (
+                f" Patch {self.release.version} is out and may support this version: "
+                "use the download link above."
+            )
+        self.detail.set(message)
         self.update_buttons(st.kind)
 
     def update_buttons(self, kind):
