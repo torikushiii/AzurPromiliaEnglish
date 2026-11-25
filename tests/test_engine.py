@@ -90,10 +90,10 @@ def pool_strings(data: bytes) -> list[bytes]:
 
 
 class Fixture:
-    def __init__(self, seed: int = 1):
+    def __init__(self, seed: int = 1, english: str = "English", version: str = "9.9"):
         rng = random.Random(seed)
         self.base = [f"日本語 {i}".encode() for i in range(40)]
-        self.added = [f"English {i}".encode() for i in range(25)]
+        self.added = [f"{english} {i}".encode() for i in range(25)]
         pool_seed, table_seed = rng.randbytes(4096), rng.randbytes(4096)
         pool_header, table_header = rng.randbytes(SPAN), rng.randbytes(SPAN)
 
@@ -116,7 +116,7 @@ class Fixture:
 
         sha = engine._sha
         self.patch = engine.PatchData(
-            version="9.9",
+            version=version,
             build=BUILD,
             files={
                 "pool": engine.FileInfo(

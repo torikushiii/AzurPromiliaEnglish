@@ -39,7 +39,7 @@ To go back to the original Japanese text, run the patcher again and click **Rest
 
 A game update replaces the patched files with new Japanese ones, and the patcher will report a different game version. Wait for a new release that supports the new version.
 
-The patcher checks [Releases](../../releases) when it starts and shows a download link when a newer patch is out. It only reads GitHub's public release list and never downloads or installs anything by itself. To turn the check off, add `"check_updates": false` to `%LOCALAPPDATA%\AP-English-Patcher\settings.json`.
+The patcher checks [Releases](../../releases) when it starts and shows an **update** link when a newer patch is out. Clicking it (after you confirm) downloads only the new translation data, a few MB, from this repository's releases, checks it against its published SHA-256, and reinstalls the English patch if it was installed. It never downloads or runs a program, and nothing is downloaded until you click. To turn the check off, add `"check_updates": false` to `%LOCALAPPDATA%\AP-English-Patcher\settings.json`.
 
 If the patcher ever reports unrecognized files, use the in-game resource check under **Settings → Other → Resource Integrity** to restore the original files.
 

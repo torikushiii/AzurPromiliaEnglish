@@ -32,5 +32,7 @@ jobs:
         run: >-
           gh release create $env:GITHUB_REF_NAME
           "release/AP-English-Patcher-$env:GITHUB_REF_NAME.zip"
+          "release/patch-data.bin"
+          "release/patch-data.bin.sha256"
           --title "English Patch $env:GITHUB_REF_NAME"
           --notes-file "release/notes-$env:GITHUB_REF_NAME.md"

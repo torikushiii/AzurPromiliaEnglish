@@ -16,6 +16,12 @@ if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
 Compress-Archive -LiteralPath $exe -DestinationPath $zip -CompressionLevel Optimal
 Remove-Item -Recurse -Force (Join-Path $root 'patcher\__pycache__') -ErrorAction SilentlyContinue
 
+# The patcher's in-app update downloads these two: the data and its SHA-256.
+$data = Join-Path $outDir 'patch-data.bin'
+Copy-Item -LiteralPath (Join-Path $root 'patcher\data\patch-data.bin') -Destination $data -Force
+$dataHash = (Get-FileHash -LiteralPath $data).Hash.ToLower()
+[IO.File]::WriteAllText((Join-Path $outDir 'patch-data.bin.sha256'), "$dataHash  patch-data.bin`n")
+
 $exeHash = (Get-FileHash -LiteralPath $exe).Hash.ToLower()
 $zipHash = (Get-FileHash -LiteralPath $zip).Hash.ToLower()
 $notes = Join-Path $outDir "notes-$tag.md"
@@ -31,6 +37,7 @@ Extract the zip, close the game, run ``AP-English-Patcher.exe`` and click **Inst
 | --- | --- |
 | AP-English-Patcher.exe | ``$exeHash`` |
 | AP-English-Patcher-$tag.zip | ``$zipHash`` |
+| patch-data.bin (used by the patcher's update link) | ``$dataHash`` |
 "@ | Set-Content -LiteralPath $notes -Encoding utf8
 
 Write-Host ""
@@ -41,4 +48,4 @@ Write-Host "exe SHA-256 $exeHash"
 Write-Host "zip SHA-256 $zipHash"
 Write-Host ""
 Write-Host "Publish with:"
-Write-Host "  gh release create $tag `"$zip`" --title `"English Patch $tag`" --notes-file `"$notes`""
+Write-Host "  gh release create $tag `"$zip`" `"$data`" `"$data.sha256`" --title `"English Patch $tag`" --notes-file `"$notes`""

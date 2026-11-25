@@ -83,18 +83,25 @@ class App(tk.Tk):
         )
         version_row = ttk.Frame(outer)
         version_row.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, px(12)))
-        ttk.Label(
-            version_row,
-            text=f"Patch {patch.version} for {patch.game_label}",
-            foreground="#666",
-        ).pack(side="left")
+        self.version_label = ttk.Label(version_row, foreground="#666")
+        self.version_label.pack(side="left")
+        self.show_version()
         self.update_link = ttk.Label(
             version_row,
             foreground="#0a5fc2",
             cursor="hand2",
             font=("Segoe UI", 9, "underline"),
         )
-        self.update_link.bind("<Button-1>", lambda _e: self.open_release())
+        self.update_link.bind("<Button-1>", lambda _e: self.on_update_link())
+        self.notes_link = ttk.Label(
+            version_row,
+            text="what's new",
+            foreground="#0a5fc2",
+            cursor="hand2",
+            font=("Segoe UI", 9, "underline"),
+        )
+        self.notes_link.bind("<Button-1>", lambda _e: self.open_release())
+        self.pending_patch: engine.PatchData | None = None
 
         ttk.Label(outer, text="Game folder").grid(
             row=2, column=0, columnspan=2, sticky="w"
@@ -163,19 +170,73 @@ class App(tk.Tk):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def show_version(self):
+        self.version_label.configure(
+            text=f"Patch {self.patch.version} for {self.patch.game_label}"
+        )
+
     def show_update(self, release: updates.Release):
         self.release = release
+        action = "update" if release.has_data else "download"
         self.update_link.configure(
-            text=f"Patch {release.version} is available: download"
+            text=f"Patch {release.version} is available: {action}"
         )
         gap = int(round(8 * self.winfo_fpixels("1i") / 96.0))
         self.update_link.pack(side="left", padx=(gap, 0))
+        if release.has_data:
+            self.notes_link.pack(side="left", padx=(gap, 0))
         if self.last_status:
             self.show_status(self.last_status)
+
+    def hide_update(self):
+        self.release = None
+        self.update_link.pack_forget()
+        self.notes_link.pack_forget()
 
     def open_release(self):
         if self.release:
             webbrowser.open(self.release.url)
+
+    def on_update_link(self):
+        if not self.release:
+            return
+        if not self.release.has_data:
+            self.open_release()
+            return
+        if self.busy:
+            return
+        installed = self.last_status and self.last_status.kind in ("patched", "mixed")
+        question = (
+            f"Download patch {self.release.version} (a few MB) from GitHub "
+            "and switch to it?"
+        )
+        if installed:
+            question += (
+                f"\n\nThe installed patch {self.patch.version} will be removed and "
+                f"patch {self.release.version} installed in its place. "
+                "Close the game first."
+            )
+        if not messagebox.askyesno(APP_TITLE, question):
+            return
+        release, old = self.release, self.patch
+        game = Path(self.folder.get()) if self.folder.get() else None
+
+        def work():
+            new, tmp = updates.download_patch_data(release, old.version)
+
+            def switched(patch):
+                self.pending_patch = patch
+
+            return updates.switch_patch_data(game, old, new, tmp, on_switched=switched)
+
+        self.run_in_background(f"Updating to patch {release.version}...", work)
+
+    def adopt_pending_patch(self):
+        if self.pending_patch is None:
+            return
+        self.patch, self.pending_patch = self.pending_patch, None
+        self.show_version()
+        self.hide_update()
 
     def pick_initial_folder(self):
         saved = load_settings().get("game_dir")
@@ -217,7 +278,7 @@ class App(tk.Tk):
         def worker():
             try:
                 self.events.put(("done", fn()))
-            except engine.PatchError as e:
+            except (engine.PatchError, updates.UpdateError) as e:
                 self.events.put(("error", str(e)))
             except Exception as e:
                 self.events.put(("error", f"Unexpected error: {type(e).__name__}: {e}"))
@@ -234,6 +295,8 @@ class App(tk.Tk):
                 self.progress.stop()
                 self.progress.grid_remove()
                 self.busy = False
+                # an update may have switched the data even if a later step failed
+                self.adopt_pending_patch()
                 if kind == "status":
                     self.show_status(value)
                 elif kind == "done":
@@ -275,9 +338,10 @@ class App(tk.Tk):
         self.status.set(titles.get(st.kind, st.kind))
         message = st.message
         if st.kind == "wrong_build" and self.release:
+            action = "update" if self.release.has_data else "download"
             message += (
                 f" Patch {self.release.version} is out and may support this version: "
-                "use the download link above."
+                f"use the {action} link above."
             )
         self.detail.set(message)
         self.update_buttons(st.kind)
@@ -320,7 +384,7 @@ def run_cli(argv) -> int:
 
     code = 0
     try:
-        patch = engine.load_patch_data()
+        patch = updates.best_patch_data(engine.load_patch_data())
         say(f"patch {patch.version} for {patch.game_label}")
         if args.cli == "install":
             say(engine.install(args.game, patch, say))
@@ -341,7 +405,7 @@ def main():
         sys.exit(run_cli(sys.argv[1:]))
     enable_dpi_awareness()
     try:
-        patch = engine.load_patch_data()
+        patch = updates.best_patch_data(engine.load_patch_data())
     except Exception as e:
         root = tk.Tk()
         root.withdraw()
