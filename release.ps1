@@ -25,8 +25,13 @@ $dataHash = (Get-FileHash -LiteralPath $data).Hash.ToLower()
 $exeHash = (Get-FileHash -LiteralPath $exe).Hash.ToLower()
 $zipHash = (Get-FileHash -LiteralPath $zip).Hash.ToLower()
 $notes = Join-Path $outDir "notes-$tag.md"
+# The release commit's body ("Release X.Y" + bullet lines) is the changelog.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8  # git prints UTF-8; keep Japanese intact
+$body =(git -C $root log -1 --format=%b) -join "`n"
+$changes = if ($body.Trim()) { "`n## Changes`n`n$($body.Trim())`n" } else { '' }
 @"
 English patch $version for Azur Promilia JP (PC), $gameLabel.
+$changes
 
 Extract the zip, close the game, run ``AP-English-Patcher.exe`` and click **Install English Patch**.
 
