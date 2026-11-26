@@ -39,10 +39,12 @@ def sha(data):
 def seed_of(raw):
     version, keysize = struct.unpack_from("<II", raw)
     assert version == 1 and keysize == 4112 and keysize + 8 == engine.SPAN
-    seed = unpad(
-        AES.new(archive.aeskey, AES.MODE_CBC, archive.iv).decrypt(raw[8 : 8 + keysize]),
-        16,
-    )
+    block = raw[8 : 8 + keysize]
+    if getattr(archive, "file_seed", None):
+        seed = archive.file_seed(block)
+    else:
+        aes = AES.new(archive.aeskey, AES.MODE_CBC, archive.iv)
+        seed = unpad(aes.decrypt(block), 16)
     assert len(seed) == 4096
     return seed
 
