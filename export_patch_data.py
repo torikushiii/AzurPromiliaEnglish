@@ -26,7 +26,8 @@ spec = importlib.util.spec_from_file_location(
 )
 tb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tb)
-SHIPPED_BUNDLES = ("boot",)  # the label table ships once it is fully translated
+SHIPPED_BUNDLES = ("boot", "labels")
+TEST_INSTALLS = {"boot": "boot-strings", "labels": "ui-labels"}
 AES = importlib.import_module("Crypto.Cipher.AES")
 unpad = importlib.import_module("Crypto.Util.Padding").unpad
 
@@ -48,7 +49,7 @@ def seed_of(raw):
 
 def stock_bundle_file(role, raw):
     """The game file without our own test install (undone from its saved bytes)."""
-    saved = STUFF / "boot-strings" / "test-install"
+    saved = STUFF / TEST_INSTALLS[role] / "test-install"
     info_path, orig_path = saved / f"{role}.json", saved / f"{role}.orig"
     if info_path.exists() and orig_path.exists():
         info = bundles.TextBundle(**json.loads(info_path.read_text("utf-8")))
