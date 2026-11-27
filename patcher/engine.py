@@ -385,6 +385,12 @@ def installed_builds(game: Path, package: str) -> set[str]:
     }
 
 
+def current_build(game: Path, package: str) -> str:
+    """The package's newest manifest build (an update can leave older ones behind)."""
+    builds = [b for b in installed_builds(game, package) if b.isdigit()]
+    return max(builds, key=int) if builds else ""
+
+
 def _wrong_build_message(game: Path, patch: PatchData, builds: set[str]) -> str:
     others = sorted(builds - {patch.build})
     version = installed_game_version(game)
@@ -412,9 +418,7 @@ def inspect(game: Path, patch: PatchData) -> Status:
     game = normalize_game_dir(game)
     if not is_game_dir(game):
         return Status("not_found", f"{EXE_NAME} was not found in this folder.")
-    builds = set()
-    for info in patch.files.values():
-        builds |= installed_builds(game, info.package)
+    builds = {current_build(game, info.package) for info in patch.files.values()} - {""}
     targets = {role: _paths(game, info) for role, info in patch.files.items()}
     if builds != {patch.build} or not all(t.is_file() for t in targets.values()):
         return Status("wrong_build", _wrong_build_message(game, patch, builds))

@@ -7,14 +7,6 @@ An unofficial English translation of the in-game text for **Azur Promilia (Japan
 
 This project is not affiliated with or endorsed by the developers or publishers of Azur Promilia.
 
-> [!TIP]
-> **Use version 1.4 or newer.** Earlier releases were mostly machine translation. Since 1.4, the prologue and all of Chapter 1 have been reviewed line by line against the Japanese, with consistent names for characters and places. Later chapters are still being reviewed and improve with each release.
->
-> **Upgrading from an older version:** run the patcher you installed it with and click **Restore Japanese**, then install 1.4. If you no longer have the old patcher, restore the original files with the in-game **Settings → Other → Resource Integrity** check first.
-
-> [!NOTE]
-> The menus and settings have been tested in game. Story text from Chapter 2 onward, quests and item descriptions are still largely machine translation. Screenshots of lines that read badly are welcome in [Issues](../../issues).
-
 ## Screenshots
 
 | Graphics | Audio | Account |
@@ -42,10 +34,6 @@ A game update replaces the patched files with new Japanese ones, and the patcher
 The patcher checks [Releases](../../releases) when it starts and shows an **update** link when a newer patch is out. Clicking it (after you confirm) downloads only the new translation data, a few MB, from this repository's releases, checks it against its published SHA-256, and reinstalls the English patch if it was installed. It never downloads or runs a program, and nothing is downloaded until you click. To turn the check off, add `"check_updates": false` to `%LOCALAPPDATA%\AP-English-Patcher\settings.json`.
 
 If the patcher ever reports unrecognized files, use the in-game resource check under **Settings → Other → Resource Integrity** to restore the original files.
-
-## Known limitations
-
-- A few fixed interface labels, such as the settings toggles' 閉じる and the 初期設定に戻す button, stay in Japanese because they are not stored in the game's text tables.
 
 ## Alternatives
 

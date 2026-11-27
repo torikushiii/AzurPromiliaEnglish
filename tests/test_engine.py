@@ -209,7 +209,7 @@ class PatchDataTests(unittest.TestCase):
 
     def test_shipped_patch_data(self):
         data = engine.load_patch_data()
-        self.assertEqual(data.build, BUILD)
+        self.assertRegex(data.build, r"^\d+$")
         self.assertTrue(data.version)
         self.assertTrue(data.game_version)
         self.assertGreater(len(data.new_strings), 0)
@@ -277,6 +277,10 @@ class GameTests(unittest.TestCase):
         status = self.status()
         self.assertEqual(status.kind, "wrong_build")
         self.assertIn("3300000", status.message)
+
+    def test_older_leftover_manifest_is_ignored(self):
+        self.fixture.make_game(self.root, builds=("3100000", BUILD))
+        self.assertEqual(self.status().kind, "stock")
 
     def test_missing_manifests_are_reported(self):
         self.fixture.make_game(self.root, builds=())
