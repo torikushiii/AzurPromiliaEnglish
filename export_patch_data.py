@@ -69,8 +69,9 @@ def text_bundles():
         info = tb.locate(stock, kind, path, marker)
         info.role = role
         info.strings = json.loads((STUFF / strings_file).read_text("utf-8"))
-        start, end, _ = bundles.changed_range(stock, info)
-        patched = bundles.patched_bytes(stock, info)
+        plan = bundles.build_plan(stock, info)  # the slow search, done once here
+        start, end, _ = bundles.changed_range(stock, info, plan)
+        patched = bundles._patched(stock, info, plan)  # must work without the fallback
         info.backup_start, info.backup_end = start, end
         info.backup_sha256 = sha(stock[start:end])
         info.patched_sha256 = sha(patched)
@@ -80,7 +81,7 @@ def text_bundles():
             f"english {info.patched_sha256[:12]}",
             flush=True,
         )
-        out.append((info, stock))
+        out.append((info, stock, plan))
     return out
 
 
@@ -101,21 +102,15 @@ def main():
     if not game_version:
         raise SystemExit("Could not read the game version; pass --game-version.")
     builds = {
-        build
-        for package in (b.BASE, b.STREAM)
-        for build in engine.installed_builds(b.GAME, package.name)
+        engine.current_build(b.GAME, package.name) for package in (b.BASE, b.STREAM)
     }
-    if builds != {"3219598"}:
+    if builds != {b.BUILD}:
         raise SystemExit(
-            f"Installed game builds are {sorted(builds)}, expected 3219598."
+            f"Installed game builds are {sorted(builds)}, expected {b.BUILD}."
         )
 
     installed = {}
-    for line in (
-        (STUFF / "gameplay-en-corrections-3219598" / "installed.sha256")
-        .read_text()
-        .split("\n")
-    ):
+    for line in (b.CORRECTIONS / "installed.sha256").read_text().split("\n"):
         if line.strip():
             digest, name = line.split(maxsplit=1)
             installed[name.strip()] = digest
@@ -171,14 +166,15 @@ def main():
 
     data = engine.PatchData(
         args.version,
-        "3219598",
+        b.BUILD,
         files,
         stock_count,
         new_strings,
         new_hashes,
         edits,
         game_version,
-        [info for info, _ in shipped],
+        [info for info, _, _ in shipped],
+        {info.role: plan for info, _, plan in shipped},
     )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     engine.save_patch_data(args.out, data)
@@ -192,9 +188,9 @@ def main():
         sha(engine._swap_table(stock["table"], data, True))
         == files["table"].patched_sha256
     )
-    for info, stock in shipped:
+    for info, stock, _ in shipped:
         loaded = next(b for b in data.text_bundles if b.role == info.role)
-        patched = bundles.patched_bytes(stock, loaded)
+        patched = bundles._patched(stock, loaded, data.bundle_plans[info.role])
         assert sha(patched) == loaded.patched_sha256
         backup = stock[loaded.backup_start : loaded.backup_end]
         assert (

@@ -850,14 +850,55 @@ def _same_length_segments(old: bytes, new: bytes):
     return [(0, 0, a), (b, b, len(old) - b)]
 
 
-def changed_range(data: bytes, info: TextBundle) -> tuple[int, int, bytes]:
+def _plan_of(stream: bytes, usize: int) -> list[int]:
+    """The LZ4 parse of our rebuilt stream as flat (literals, offset, match) triples."""
+    flat: list[int] = []
+    for _, lit, off, ml in lz4_parse(stream, usize)[0]:
+        flat += (lit, off, ml)
+    return flat
+
+
+def _from_plan(flat, plain: bytes) -> bytes:
+    """Encode `plain` with a recorded parse: no match search, so it takes milliseconds.
+
+    The plan holds only lengths and offsets; the bytes come from the player's own file
+    and the English text. A plan that does not fit this text raises BundleError."""
+    if len(flat) % 3:
+        raise BundleError("Bad rebuild plan.")
+    seqs, pos = [], 0
+    for k in range(0, len(flat), 3):
+        lit, off, ml = flat[k : k + 3]
+        seqs.append((pos, lit, off, ml))
+        pos += lit + ml
+    if pos != len(plain):
+        raise BundleError("The rebuild plan does not fit this text.")
+    stream = lz4_encode(seqs, plain)
+    if lz4_parse(stream, len(plain))[1] != plain:
+        raise BundleError("The rebuild plan does not fit this text.")
+    return stream
+
+
+def build_plan(data: bytes, info: TextBundle) -> dict:
+    """The parse choices of a full rebuild, so installs can skip the slow search."""
+    return _changed(data, info, None)[3]
+
+
+def changed_range(
+    data: bytes, info: TextBundle, plan: dict | None = None
+) -> tuple[int, int, bytes]:
     """(start, end, new bytes) of the file range the patch rewrites.
 
     Changed blocks share the compressed space of the blocks they span: all but the
     last take what they need, and the last is packed to exactly what is left, so the
     bundle keeps its length. If block sizes change, the block table is rewritten too,
-    to exactly its old compressed size.
+    to exactly its old compressed size. With a `plan` from build_plan the blocks are
+    encoded from the recorded parse instead of searched for.
     """
+    return _changed(data, info, plan)[:3]
+
+
+def _changed(data: bytes, info: TextBundle, plan: dict | None):
+    record: dict = {"blocks": {}, "table": None}
     sub = _bundle(data, info)
     layout, cipher, parts = decode(data, info)
     blocks = layout.blocks
@@ -877,16 +918,28 @@ def changed_range(data: bytes, info: TextBundle) -> tuple[int, int, bytes]:
             kept[i] = _kept(moved, new, pos)
         pos += blk.usize
     if not changed:
-        return 0, 0, b""
+        return 0, 0, b"", record
     first, last = changed[0], changed[-1]
     span = range(first, last + 1)
-    streams = {i: rewrite(kept[i], news[i], None) for i in changed[:-1]}
+
+    def encode(i, target):
+        if plan is not None:
+            flat = plan.get("blocks", {}).get(str(i))
+            if flat is None:
+                raise BundleError("The rebuild plan does not fit this text.")
+            stream = _from_plan(flat, news[i])
+            if target is not None and len(stream) != target:
+                raise BundleError("The rebuild plan does not fit this text.")
+        else:
+            stream = rewrite(kept[i], news[i], target)
+        record["blocks"][str(i)] = _plan_of(stream, len(news[i]))
+        return stream
+
+    streams = {i: encode(i, None) for i in changed[:-1]}
     used = sum(len(s) for s in streams.values()) + sum(
         blocks[i].csize for i in span if i not in changed
     )
-    streams[last] = rewrite(
-        kept[last], news[last], sum(blocks[i].csize for i in span) - used
-    )
+    streams[last] = encode(last, sum(blocks[i].csize for i in span) - used)
     stored, sizes = [], {}
     for i in span:
         if i not in streams:
@@ -908,14 +961,31 @@ def changed_range(data: bytes, info: TextBundle) -> tuple[int, int, bytes]:
         )
         table_kept = _kept(table_moved, table, 0)
         data_at = blocks[0].offset
+        planned = plan.get("table") if plan is not None else None
+        if plan is not None and not planned:
+            raise BundleError("The rebuild plan does not fit this text.")
         try:
-            packed = rewrite(table_kept, table, layout.info_size)
+            if planned:
+                if planned["mode"] != "fit":
+                    raise BundleError("grow")
+                packed = _from_plan(planned["seqs"], table)
+                if len(packed) != layout.info_size:
+                    raise BundleError("The rebuild plan does not fit this text.")
+            else:
+                packed = rewrite(table_kept, table, layout.info_size)
             start = layout.info_at
             prefix = (
                 packed + sub[layout.info_at + layout.info_size : blocks[first].offset]
             )
+            record["table"] = {"mode": "fit", "seqs": _plan_of(packed, len(table))}
         except BundleError:
-            packed = rewrite(table_kept, table, None)
+            if planned and planned["mode"] == "grow":
+                packed = _from_plan(planned["seqs"], table)
+            elif planned:
+                raise
+            else:
+                packed = rewrite(table_kept, table, None)
+            record["table"] = {"mode": "grow", "seqs": _plan_of(packed, len(table))}
             if layout.info_at + len(packed) > data_at:
                 raise
             start = layout.info_size_at
@@ -927,11 +997,22 @@ def changed_range(data: bytes, info: TextBundle) -> tuple[int, int, bytes]:
                 + sub[data_at : blocks[first].offset]
             )
     end = blocks[last].offset + blocks[last].csize
-    return info.offset + start, info.offset + end, prefix + b"".join(stored)
+    return info.offset + start, info.offset + end, prefix + b"".join(stored), record
 
 
-def patched_bytes(data: bytes, info: TextBundle) -> bytes:
-    start, end, new = changed_range(data, info)
+def patched_bytes(data: bytes, info: TextBundle, plan: dict | None = None) -> bytes:
+    """The patched file. A `plan` (build_plan) makes this fast; if it does not fit, the
+    full rebuild runs instead, so a stale plan only costs time."""
+    if plan:
+        try:
+            return _patched(data, info, plan)
+        except BundleError:
+            pass
+    return _patched(data, info, None)
+
+
+def _patched(data: bytes, info: TextBundle, plan: dict | None) -> bytes:
+    start, end, new = changed_range(data, info, plan)
     out = data[:start] + new + data[end:]
     expected = EDITORS[info.kind](table_plain(data, info), info.strings)[0]
     if len(out) != len(data) or table_plain(out, info) != expected:

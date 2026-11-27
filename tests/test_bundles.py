@@ -1,3 +1,5 @@
+import json
+import lzma
 import random
 import struct
 import sys
@@ -125,6 +127,27 @@ class BundleTests(unittest.TestCase):
         backup = self.stock[self.info.backup_start : self.info.backup_end]
         self.assertEqual(bundles.restored_bytes(patched, self.info, backup), self.stock)
 
+    def test_plan_gives_the_same_bytes(self):
+        plan = bundles.build_plan(self.stock, self.info)
+        self.assertTrue(plan["blocks"])
+        self.assertEqual(
+            bundles._patched(self.stock, self.info, plan),
+            bundles.patched_bytes(self.stock, self.info),
+        )
+
+    def test_plan_holds_no_text(self):
+        plan = bundles.build_plan(self.stock, self.info)
+        values = [v for flat in plan["blocks"].values() for v in flat]
+        self.assertTrue(all(isinstance(v, int) for v in values))
+
+    def test_stale_plan_falls_back_to_full_rebuild(self):
+        plan = bundles.build_plan(self.stock, self.info)
+        expected = bundles.patched_bytes(self.stock, self.info)
+        broken = {"blocks": {k: [v[0] + 1, *v[1:]] for k, v in plan["blocks"].items()}}
+        with self.assertRaises(bundles.BundleError):
+            bundles._patched(self.stock, self.info, broken)
+        self.assertEqual(bundles.patched_bytes(self.stock, self.info, broken), expected)
+
     def test_longer_english_is_refused(self):
         self.info.strings = {"alert_title": "x" * 500}
         with self.assertRaises(bundles.BundleError):
@@ -188,8 +211,32 @@ class GameBundleTests(unittest.TestCase):
 
     def test_patch_data_round_trip(self):
         path = Path(self.tmp.name) / "patch.bin"
+        self.patch.bundle_plans = {"boot": bundles.build_plan(self.stock, self.info)}
         engine.save_patch_data(path, self.patch)
         self.assertEqual(engine.load_patch_data(path), self.patch)
+
+    def test_install_uses_the_plan(self):
+        self.patch.bundle_plans = {"boot": bundles.build_plan(self.stock, self.info)}
+        with mock.patch.object(
+            bundles, "rewrite", side_effect=AssertionError("search")
+        ):
+            engine.install(self.game, self.patch)
+        self.assertEqual(
+            engine._sha(self.target.read_bytes()), self.info.patched_sha256
+        )
+
+    def test_old_loaders_ignore_plans(self):
+        # 1.7.1 and older build TextBundle(**b) from "bundles" and ignore unknown keys
+        path = Path(self.tmp.name) / "patch.bin"
+        self.patch.bundle_plans = {"boot": bundles.build_plan(self.stock, self.info)}
+        engine.save_patch_data(path, self.patch)
+        raw = lzma.decompress(path.read_bytes())
+        (n,) = struct.unpack_from("<I", raw, len(engine.MAGIC))
+        start = len(engine.MAGIC) + 4
+        header = json.loads(raw[start : start + n])
+        self.assertIn("plans", header)
+        for b in header["bundles"]:
+            self.assertEqual(set(b), set(bundles.TextBundle.__dataclass_fields__))
 
 
 if __name__ == "__main__":

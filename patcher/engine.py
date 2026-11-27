@@ -55,6 +55,7 @@ class PatchData:
     edits: array  # flat uint32 triples: offset, stock value, patched value
     game_version: str = ""
     text_bundles: list[bundles.TextBundle] = field(default_factory=list)
+    bundle_plans: dict = field(default_factory=dict)
 
     @property
     def game_label(self) -> str:
@@ -90,6 +91,8 @@ def save_patch_data(path: Path, data: PatchData) -> None:
     }
     if data.text_bundles:
         header["bundles"] = [b.as_json() for b in data.text_bundles]
+    if data.bundle_plans:
+        header["plans"] = data.bundle_plans
     head = json.dumps(header, ensure_ascii=False).encode("utf-8")
     payload = MAGIC + U32.pack(len(head)) + head + b"".join(blobs)
     path.write_bytes(lzma.compress(payload, preset=9))
@@ -137,6 +140,7 @@ def load_patch_data(path: Path | None = None) -> PatchData:
         edits,
         header.get("game_version", ""),
         [bundles.TextBundle(**b) for b in header.get("bundles", [])],
+        header.get("plans", {}),
     )
 
 
@@ -482,12 +486,14 @@ def _backup_path(info: bundles.TextBundle) -> Path:
     return BACKUP_DIR / f"{info.role}-{info.stock_sha256[:16]}.bin"
 
 
-def _bundle_replacement(game: Path, info: bundles.TextBundle, to_patched: bool):
+def _bundle_replacement(
+    game: Path, info: bundles.TextBundle, to_patched: bool, plan: dict | None = None
+):
     target = _bundle_path(game, info)
     current = target.read_bytes()
     try:
         if to_patched:
-            new = bundles.patched_bytes(current, info)
+            new = bundles.patched_bytes(current, info, plan)
             original = current[info.backup_start : info.backup_end]
             if _sha(original) != info.backup_sha256:
                 raise PatchError(f"{target.name} does not match the tested version.")
@@ -626,7 +632,8 @@ def _run(game: Path, patch: PatchData, to_patched: bool, progress) -> str:
     for info in patch.text_bundles:
         if status.states.get(info.role) not in (None, want):
             progress(f"Building {_bundle_path(game, info).name}...")
-            replacements.append(_bundle_replacement(game, info, to_patched))
+            plan = patch.bundle_plans.get(info.role)
+            replacements.append(_bundle_replacement(game, info, to_patched, plan))
     _install(replacements, progress)
     final = inspect(game, patch)
     if final.kind != want:
